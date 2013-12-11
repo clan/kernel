@@ -40,7 +40,8 @@ static unsigned int pkt_chk_out(unsigned int hooknum, struct sk_buff *skb,
             break;
     }
 
-    pr_info("OUT: %pI4:%u -> %pI4:%u, proto: %u\n", &iph->saddr, sport, &iph->daddr, dport, iph->protocol);
+    pr_info("OUT: %pI4:%u -> %pI4:%u, proto: %u\n",
+        &iph->saddr, sport, &iph->daddr, dport, iph->protocol);
 
     return NF_ACCEPT;
 }
@@ -65,12 +66,20 @@ static unsigned int pkt_chk_in(unsigned int hooknum, struct sk_buff *skb,
     // so we need a hack: skip the ip header.
     switch (iph->protocol) {
         case IPPROTO_UDP:
-            uh = (struct udphdr *)(skb_transport_header(skb) + (iph->ihl << 2));
+            uh = (struct udphdr *)skb_transport_header(skb);
+            if (!skb_transport_header_was_set(skb)) {
+                // transport header is set correctly for kernel 3.10,
+                // may be true for earlier version, no test yet
+                uh = (struct udphdr *)(uh + (iph->ihl << 2));
+            }
             sport = (unsigned int)ntohs(uh->source);
             dport = (unsigned int)ntohs(uh->dest);
             break;
         case IPPROTO_TCP:
-            th = (struct tcphdr *)(skb_transport_header(skb) + (iph->ihl << 2));
+            th = (struct tcphdr *)skb_transport_header(skb);
+            if (!skb_transport_header_was_set(skb)) {
+                th = (struct tcphdr *)(th + (iph->ihl << 2));
+            }
             sport = (unsigned int)ntohs(th->source);
             dport = (unsigned int)ntohs(th->dest);
             break;
@@ -78,7 +87,9 @@ static unsigned int pkt_chk_in(unsigned int hooknum, struct sk_buff *skb,
             break;
     }
 
-    pr_info("IN: %pI4:%u -> %pI4:%u, proto: %u\n", &iph->saddr, sport, &iph->daddr, dport, iph->protocol);
+    pr_info("IN: %pI4:%u -> %pI4:%u, proto: %u, dev: %s\n",
+        &iph->saddr, sport, &iph->daddr, dport,
+        iph->protocol, indev);
 
     return NF_ACCEPT;
 }
