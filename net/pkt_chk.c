@@ -9,6 +9,7 @@
 #include <linux/udp.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/netfilter_ipv4.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
@@ -63,23 +64,34 @@ static unsigned int pkt_chk_in(unsigned int hooknum, struct sk_buff *skb,
     // @note when a packet goes in from wire, it travels from physical layer,
     // data link layer, network layer upwards, therefore it might not go
     // through the functions for skb_transport_header to work as expected.
-    // so we need a hack: skip the ip header.
+    // so we need a hack: skip the ip header. this is the case of kernel 
+    // below 3.9.
+    // or we can just use (unsigned char *)iph + (iph->ihl << 2) for the
+    // transport header, this should work for all kernel version.
     switch (iph->protocol) {
         case IPPROTO_UDP:
             uh = (struct udphdr *)skb_transport_header(skb);
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0) )
+            uh = (struct udphdr *)((unsigned char *)uh + (iph->ihl << 2));
+#else
             if (!skb_transport_header_was_set(skb)) {
                 // transport header is set correctly for kernel 3.10,
                 // may be true for earlier version, no test yet
-                uh = (struct udphdr *)(uh + (iph->ihl << 2));
+                uh = (struct udphdr *)((unsigned char *)uh + (iph->ihl << 2));
             }
+#endif
             sport = (unsigned int)ntohs(uh->source);
             dport = (unsigned int)ntohs(uh->dest);
             break;
         case IPPROTO_TCP:
             th = (struct tcphdr *)skb_transport_header(skb);
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0) )
+            th = (struct tcphdr *)((unsigned char *)th + (iph->ihl << 2));
+#else
             if (!skb_transport_header_was_set(skb)) {
-                th = (struct tcphdr *)(th + (iph->ihl << 2));
+                th = (struct tcphdr *)((unsigned char *)th + (iph->ihl << 2));
             }
+#endif
             sport = (unsigned int)ntohs(th->source);
             dport = (unsigned int)ntohs(th->dest);
             break;
