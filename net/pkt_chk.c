@@ -41,8 +41,8 @@ static unsigned int pkt_chk_out(unsigned int hooknum, struct sk_buff *skb,
             break;
     }
 
-    pr_info("OUT: %pI4:%u -> %pI4:%u, proto: %u\n",
-        &iph->saddr, sport, &iph->daddr, dport, iph->protocol);
+    pr_info("OUT: v%d, %pI4:%u -> %pI4:%u, proto: %u\n",
+        iph->version, &iph->saddr, sport, &iph->daddr, dport, iph->protocol);
 
     return NF_ACCEPT;
 }
@@ -52,12 +52,13 @@ static unsigned int pkt_chk_in(unsigned int hooknum, struct sk_buff *skb,
         const struct net_device *out,
         int (*okfn)(struct sk_buff *))
 {
-    static const char nulldevname[IFNAMSIZ] __attribute__((aligned(sizeof(long))));
+    unsigned char *h;
+    const char *indev;
     struct tcphdr *th;
     struct udphdr *uh;
     uint16_t sport = 0, dport = 0;
     struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
-    const char *indev;
+    static const char nulldevname[IFNAMSIZ] __attribute__((aligned(sizeof(long))));
 
     indev = in ? in->name : nulldevname;
 
@@ -66,41 +67,38 @@ static unsigned int pkt_chk_in(unsigned int hooknum, struct sk_buff *skb,
     // through the functions for skb_transport_header to work as expected.
     // so we need a hack: skip the ip header. this is the case of kernel 
     // below 3.9.
-    // or we can just use (unsigned char *)iph + (iph->ihl << 2) for the
-    // transport header, this should work for all kernel version.
     switch (iph->protocol) {
         case IPPROTO_UDP:
-            uh = (struct udphdr *)skb_transport_header(skb);
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0) )
-            uh = (struct udphdr *)((unsigned char *)uh + (iph->ihl << 2));
-#else
-            if (!skb_transport_header_was_set(skb)) {
-                // transport header is set correctly for kernel 3.10,
-                // may be true for earlier version, no test yet
-                uh = (struct udphdr *)((unsigned char *)uh + (iph->ihl << 2));
-            }
-#endif
-            sport = (unsigned int)ntohs(uh->source);
-            dport = (unsigned int)ntohs(uh->dest);
-            break;
         case IPPROTO_TCP:
-            th = (struct tcphdr *)skb_transport_header(skb);
+            // transport header is set correctly for kernel 3.9,
+            // may be true for earlier version, no test yet
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0) )
-            th = (struct tcphdr *)((unsigned char *)th + (iph->ihl << 2));
+            if (likely(skb_transport_header(skb) == (unsigned char *)iph)) {
+                pr_notice_once("transport header is not set for kernel 0x%x\n",
+                    LINUX_VERSION_CODE);
 #else
             if (!skb_transport_header_was_set(skb)) {
-                th = (struct tcphdr *)((unsigned char *)th + (iph->ihl << 2));
-            }
 #endif
-            sport = (unsigned int)ntohs(th->source);
-            dport = (unsigned int)ntohs(th->dest);
+                h = (unsigned char *)iph + (iph->ihl << 2);
+            } else {
+                h = skb_transport_header(skb);
+            }
+            if (iph->protocol == IPPROTO_UDP) {
+                uh = (struct udphdr *)h;
+                sport = (unsigned int)ntohs(uh->source);
+                dport = (unsigned int)ntohs(uh->dest);
+            } else {
+                th = (struct tcphdr *)h;
+                sport = (unsigned int)ntohs(th->source);
+                dport = (unsigned int)ntohs(th->dest);
+            }
             break;
         default:
             break;
     }
 
-    pr_info("IN: %pI4:%u -> %pI4:%u, proto: %u, dev: %s\n",
-        &iph->saddr, sport, &iph->daddr, dport,
+    pr_info("IN: v%d, %pI4:%u -> %pI4:%u, proto: %u, dev: %s\n",
+        iph->version, &iph->saddr, sport, &iph->daddr, dport,
         iph->protocol, indev);
 
     return NF_ACCEPT;
